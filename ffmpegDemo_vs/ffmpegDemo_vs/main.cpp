@@ -27,7 +27,7 @@ int main() {
 
     AVFormatContext* fmt_ctx = NULL;
     AVFormatContext* outCtx = NULL;
-    const char* src_filename = "rtsp://47.96.9.62/live/lr";// E: / lr / ubuntu / share / lr / 1.mp4";
+    const char* src_filename = "E:\\lr\\ubuntu\\share\\lr\\1.mp4";// E: / lr / ubuntu / share / lr / 1.mp4";
     const char* dstFilename = "E:/lr/save.mp4";
 
     if (avformat_open_input(&fmt_ctx, src_filename, NULL, NULL) < 0) {
@@ -103,6 +103,7 @@ int main() {
         fprintf(stderr, "Error occurred when opening output file\n");
     }
 
+    int64_t *org_pts = 0, audio_pts = 0, video_pts = 0;
     while (1) {
         AVStream* in_stream, * out_stream;
 
@@ -117,14 +118,24 @@ int main() {
             continue;
         }
 
+        AVMEDIA_TYPE_AUDIO == in_stream->codecpar->codec_type ? org_pts = &audio_pts : org_pts = &video_pts;
+
         pkt->stream_index = stream_mapping[pkt->stream_index];
         out_stream = outCtx->streams[pkt->stream_index];
-        log_packet(fmt_ctx, pkt, "in");
+        //log_packet(fmt_ctx, pkt, "in");
 
+        //pkt->pts = av_rescale_q_rnd(*org_pts, in_stream->time_base, out_stream->time_base, AV_ROUND_UP);
+        //pkt->dts = av_rescale_q_rnd(*org_pts, in_stream->time_base, out_stream->time_base, AV_ROUND_UP);
+        //*org_pts += pkt->duration;
+        //pkt->duration = av_rescale_q_rnd(pkt->duration, in_stream->time_base, out_stream->time_base, AV_ROUND_UP);
+        
+        if (av_rescale_q_rnd(pkt->pts, out_stream->time_base, { 1, 1 }, AV_ROUND_UP) > 20) {
+            break;
+        }
         /* copy packet */
         av_packet_rescale_ts(pkt, in_stream->time_base, out_stream->time_base);
         pkt->pos = -1;
-        log_packet(outCtx, pkt, "out");
+        //log_packet(outCtx, pkt, "out");
 
         ret = av_interleaved_write_frame(outCtx, pkt);
         /* pkt is now blank (av_interleaved_write_frame() takes ownership of
@@ -134,6 +145,10 @@ int main() {
             fprintf(stderr, "------------------Error muxing packet\n");
             break;
         }
+
+        std::cout << av_rescale_q_rnd(pkt->duration, out_stream->time_base, { 1,1 }, AV_ROUND_UP) << std::endl;
+
+
     }
 
     av_write_trailer(outCtx);
@@ -149,27 +164,15 @@ int main() {
     av_freep(&stream_mapping);
 
     return 0;
-
+#if 0
     int64_t org_pts = 0;
-    do {
-        if (!audio_finish && !found_audio && audio_stream_index != -1) {
-            if (av_read_frame(audio_fmtCtx, aSPacket) < 0) {
-                audio_finish = true;
-            }
-            // 不是所需的音频数据
-            if (!audio_finish && /**found_audio && */aSPacket->stream_index != audio_stream_index) {
-                av_packet_unref(aSPacket);
-                continue;
-            }
 
-            if (!audio_finish) {
-                found_audio = true;
-                // 改变packet的pts,dts,duration
-                aSPacket->stream_index = audio_ou_stream->index;
-                aSPacket->pts = av_rescale_q_rnd(org_pts, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
-                aSPacket->dts = av_rescale_q_rnd(org_pts, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
-                org_pts += aSPacket->duration;
-                aSPacket->duration = av_rescale_q_rnd(aSPacket->duration, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
+    aSPacket->stream_index = audio_ou_stream->index;
+    aSPacket->pts = av_rescale_q_rnd(org_pts, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
+    aSPacket->dts = av_rescale_q_rnd(org_pts, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
+    org_pts += aSPacket->duration;
+    aSPacket->duration = av_rescale_q_rnd(aSPacket->duration, audio_in_stream->time_base, audio_ou_stream->time_base, AV_ROUND_UP);
+#endif
 }
 #if 0
 
