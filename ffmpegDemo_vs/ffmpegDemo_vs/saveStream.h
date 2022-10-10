@@ -14,7 +14,7 @@ extern "C" {
 class saveStream
 {
 public:
-	bool openInput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\1.mp4");
+	bool openInput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\in.mp4");
 	bool openOutput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\out.mp4");
 	void save();
 
