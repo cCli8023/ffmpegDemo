@@ -5,6 +5,7 @@ int main() {
     saveStream s;
     s.openInput();
     s.openOutput();
+    s.openCodec();
     s.save();
 }
 

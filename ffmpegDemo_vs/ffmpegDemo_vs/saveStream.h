@@ -16,6 +16,7 @@ class saveStream
 public:
 	bool openInput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\in.mp4");
 	bool openOutput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\out.mp4");
+	bool openCodec();
 	void save();
 
 private:
@@ -26,5 +27,7 @@ private:
 	AVFormatContext* _outputFormatCtx;
 	std::map<int, int> _idxMap;
 
+	AVCodecContext* _decodeCtx;
+	AVCodecContext* _encodeCtx;
 };
 
