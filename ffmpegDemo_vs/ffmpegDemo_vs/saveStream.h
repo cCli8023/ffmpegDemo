@@ -29,5 +29,6 @@ private:
 
 	AVCodecContext* _decodeCtx;
 	AVCodecContext* _encodeCtx;
+	AVCodecContext* _encodeJpegCtx;
 };
 

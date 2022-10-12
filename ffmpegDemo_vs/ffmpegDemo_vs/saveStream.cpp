@@ -108,6 +108,7 @@ bool saveStream::openCodec()
     AVStream* st;
     const AVCodec* dec = NULL;
     const AVCodec* enc = NULL;
+    const AVCodec* encJpeg = NULL;
     AVDictionary* opts = NULL;
 
     ret = av_find_best_stream(_inputFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
@@ -180,6 +181,38 @@ bool saveStream::openCodec()
             av_get_media_type_string(AVMEDIA_TYPE_VIDEO));
         return false;
     }
+
+
+    encJpeg = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
+    if (!encJpeg) {
+        fprintf(stderr, "Failed to find %s codec\n",
+            av_get_media_type_string(AVMEDIA_TYPE_VIDEO));
+        return false;
+    }
+
+    /* Allocate a codec context for the decoder */
+    _encodeJpegCtx = avcodec_alloc_context3(encJpeg);
+    if (!_encodeJpegCtx) {
+        fprintf(stderr, "Failed to allocate the %s codec context\n",
+            av_get_media_type_string(AVMEDIA_TYPE_VIDEO));
+        return false;
+    }
+
+
+    _encodeJpegCtx->codec_id = AV_CODEC_ID_MJPEG;
+    _encodeJpegCtx->pix_fmt = (AVPixelFormat)st->codecpar->format;
+    _encodeJpegCtx->width = st->codecpar->width;
+    _encodeJpegCtx->height = st->codecpar->height;
+
+    _encodeJpegCtx->time_base = av_stream_get_codec_timebase(st);
+    _encodeJpegCtx->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+    /* Init the decoders */
+    if ((ret = avcodec_open2(_encodeJpegCtx, encJpeg, NULL)) < 0) {
+        fprintf(stderr, "Failed to open %s codec\n",
+            av_get_media_type_string(AVMEDIA_TYPE_VIDEO));
+        return false;
+    }
+
 
     return true;
 }
@@ -370,6 +403,55 @@ void saveStream::save()
                 if (ret != 0) {
                     fprintf(stderr, "--------Error avcodec_send_frame ()\n");
                     break;
+                }
+
+                ret = avcodec_send_frame(_encodeJpegCtx, frame);
+                if (ret != 0) {
+                    fprintf(stderr, "--------Error avcodec_send_frame ()\n");
+                    break;
+                }
+
+                ret = avcodec_receive_packet(_encodeJpegCtx, pkt);
+                if (ret == AVERROR(EAGAIN)) {
+                    av_frame_free(&frame);
+                    continue;
+                }
+                else if (ret != 0) {
+                    fprintf(stderr, "--------Error avcodec_receive_packet ()\n");
+                    break;
+                }
+                else {
+                    //write file
+                    static int fileNum = 0;
+                    char filepath[128] = { 0 };
+                    sprintf_s(filepath,"E:\\lr\\ubuntu\\share\\lr\\out%d.jpeg", fileNum++);
+
+                    AVFormatContext* jpegOut;
+                    ret = avformat_alloc_output_context2(&jpegOut, nullptr, NULL, filepath);
+                    if (ret < 0)
+                    {
+                        av_log(NULL, AV_LOG_ERROR, "open output context failed\n");
+                    }
+
+                    ret = avio_open2(&jpegOut->pb, filepath, AVIO_FLAG_WRITE, nullptr, nullptr);
+                    if (ret < 0)
+                    {
+                        av_log(NULL, AV_LOG_ERROR, "open avio failed");
+                    }
+
+                    AVStream* stream = avformat_new_stream(jpegOut, NULL);
+                    avcodec_parameters_copy(stream->codecpar, _inputFormatCtx->streams[videoIdx]->codecpar);
+                    stream->codecpar->codec_id = AV_CODEC_ID_MJPEG;
+
+                    ret = avformat_write_header(jpegOut, nullptr);
+                    if (ret < 0)
+                    {
+                        av_log(NULL, AV_LOG_ERROR, "format write header failed");
+                    }
+                    av_interleaved_write_frame(jpegOut, pkt);
+                    int ret = av_write_trailer(jpegOut);
+ 
+                    avformat_close_input(&jpegOut);
                 }
 
                 ret = avcodec_receive_packet(_encodeCtx, pkt);
