@@ -6,6 +6,9 @@ int main() {
     s.openInput();
     s.openOutput();
     s.openCodec();
+    if (!s.openFilter()) {
+        return -1;
+    }
     s.save();
 }
 

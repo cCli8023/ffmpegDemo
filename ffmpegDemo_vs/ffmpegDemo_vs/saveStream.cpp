@@ -4,7 +4,21 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+extern "C" {
+#include "libavfilter/buffersink.h"
+#include "libavfilter/buffersrc.h"
+}
+#include <windows.h>
 
+static char* dup_wchar_to_utf8(const wchar_t* w)
+{
+    char* s = NULL;
+    int l = WideCharToMultiByte(CP_UTF8, 0, w, -1, 0, 0, 0, 0);
+    s = (char*)av_malloc(l);
+    if (s)
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, s, l, 0, 0);
+    return s;
+}
 
 
 bool saveStream::openInput(std::string filePath)
@@ -167,14 +181,17 @@ bool saveStream::openCodec()
         return false;
     }
 
-    /* Copy codec parameters from input stream to output codec context */
-    if ((ret = avcodec_parameters_to_context(_encodeCtx, st->codecpar)) < 0) {
-        fprintf(stderr, "Failed to copy %s codec parameters to decoder context\n",
-            av_get_media_type_string(AVMEDIA_TYPE_VIDEO));
-        return false;
-    }
-    _encodeCtx->time_base = av_stream_get_codec_timebase(st);
-    
+    _encodeCtx->bit_rate = st->codecpar->bit_rate;
+    _encodeCtx->width = st->codecpar->width;
+    _encodeCtx->height = st->codecpar->height;
+    _encodeCtx->framerate = st->r_frame_rate;
+    _encodeCtx->gop_size = 50;
+    _encodeCtx->max_b_frames = 1;
+    _encodeCtx->pix_fmt = (AVPixelFormat)st->codecpar->format;
+
+    _encodeCtx->time_base  = av_stream_get_codec_timebase(st);
+    if (enc->id == AV_CODEC_ID_H264)
+        av_opt_set(_encodeCtx->priv_data, "preset", "slow", 0);
     /* Init the decoders */
     if ((ret = avcodec_open2(_encodeCtx, enc, NULL)) < 0) {
         fprintf(stderr, "Failed to open %s codec\n",
@@ -215,6 +232,90 @@ bool saveStream::openCodec()
 
 
     return true;
+}
+
+bool saveStream::openFilter()
+{
+    char args[512];
+    int ret = 0;
+
+    const AVFilter* buffersrc = avfilter_get_by_name("buffer");
+    const AVFilter* buffersink = avfilter_get_by_name("buffersink");
+    AVFilterInOut* outputs = avfilter_inout_alloc();
+    AVFilterInOut* inputs = avfilter_inout_alloc();
+    std::string  filters_descr = "drawtext=fontfile='E:/lr/ubuntu/share/lr/ffmpegDemo/Expo.ttf':text='llllrrrr':fontsize=100:x=100:y=100";
+
+    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV420P };
+
+    _filterGrap = avfilter_graph_alloc();
+    if (!outputs || !inputs || !_filterGrap) {
+        ret = AVERROR(ENOMEM);
+        std::cout << "avfilter_graph_alloc err  " << std::endl;
+        goto end;
+    }
+
+    /* buffer video source: the decoded frames from the decoder will be inserted here. */
+    sprintf_s(args, sizeof(args),
+        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+        _encodeCtx->width, _encodeCtx->height, _encodeCtx->pix_fmt,
+        _encodeCtx->time_base.num, _encodeCtx->time_base.den,
+        _encodeCtx->sample_aspect_ratio.num, _encodeCtx->sample_aspect_ratio.den);
+
+    ret = avfilter_graph_create_filter(&_filterCtx, buffersrc, "in",
+        args, NULL, _filterGrap);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+        std::cout << "avfilter_graph_create_filter err  " << std::endl;
+        goto end;
+    }
+
+    /* buffer video sink: to terminate the filter chain. */
+    ret = avfilter_graph_create_filter(&_filterCtxSink, buffersink, "out",
+        NULL, NULL, _filterGrap);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
+        std::cout << "avfilter_graph_create_filter err  " << std::endl;
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(_filterCtxSink, "pix_fmts", pix_fmts,
+        AV_PIX_FMT_YUV420P, AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+        std::cout << "av_opt_set_int_list err  " << std::endl;
+        goto end;
+    }
+
+    /* Endpoints for the filter graph. */
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = _filterCtx;
+    outputs->pad_idx = 0;
+    outputs->next = NULL;
+
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = _filterCtxSink;
+    inputs->pad_idx = 0;
+    inputs->next = NULL;
+    if ((ret = avfilter_graph_parse_ptr(_filterGrap, filters_descr.c_str(),
+        &inputs, &outputs, NULL)) < 0) {
+        char errBuf[128] = { 0 };
+        av_strerror(ret, errBuf, 128);
+        std::cout << "-----avfilter_graph_parse_ptr err  " << errBuf << "-- " <<  std::endl;
+        goto end;
+    }
+        
+
+    if ((ret = avfilter_graph_config(_filterGrap, NULL)) < 0) {
+        std::cout << "avfilter_graph_config err  " <<  std::endl;
+        goto end;
+    }
+        
+    return true;
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    std::cout << "err end " << std::endl;
+    return false;
 }
 
 void saveStream::save()
@@ -287,47 +388,7 @@ void saveStream::save()
 #endif
     bool reCoding = false;
     int64_t startPts = 0;
-    auto doReCoding = [this](int64_t startPts, int64_t & pts, AVRational timebaseIn, AVRational timebaseOut) {
-        AVFrame* frame = av_frame_alloc();
-        if (!frame) {
-            std::cout << "alloc frame fail " << std::endl;
-            return;
-        }
-        
-        AVPacket* pkt = av_packet_alloc();
-        if (!pkt) {
-            std::cout << "alloc frame fail " << std::endl;
-            return;
-        }
-
-        while (avcodec_receive_frame(_decodeCtx, frame) == 0) {
-            if (frame->pts < startPts) {
-                av_frame_unref(frame);
-                continue;
-            }
-            avcodec_send_frame(_encodeCtx, frame);
-        }
-
-        while (avcodec_receive_packet(_encodeCtx, pkt) == 0) {
-            
-            pts = pts == 0 ? pkt->pts : pts + pkt->duration;
-
-            pkt->pts = pkt->dts = pts;
-            av_packet_rescale_ts(pkt, timebaseIn, timebaseOut);
-
-            pkt->pos = -1;
-
-            int ret = av_interleaved_write_frame(_outputFormatCtx, pkt);
-            if (ret < 0) {
-                fprintf(stderr, "Error muxing packet\n");
-                std::cout << "Error muxing packet" << std::endl;
-                break;
-            }
-        }
-
-        av_frame_free(&frame);
-        av_packet_free(&pkt);
-    };
+   
 
     std::vector<AVPacket* > audioTemp;
     while (1) {
@@ -352,31 +413,32 @@ void saveStream::save()
 
         if (AVMEDIA_TYPE_VIDEO == _inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) {
             if (pkt->pts > videoPointa && pkt->pts < videoPointb && reCoding == false) {
-                std::cout << "-+-+" << typeStr.at(_inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) << pkt->pts * av_q2d(timebaseIn) << " " << pkt->pts << " " << pkt->flags << "-+-+" << std::endl;
+                std::cout << "drop" << typeStr.at(_inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) << pkt->pts * av_q2d(timebaseIn) << " " << pkt->pts << " " << pkt->flags  << std::endl;
                 av_packet_unref(pkt);
                 dropFrame = true;
                 continue;
             }
+
             if (dropFrame == true) {
                 dropFrame = false;
                 reCoding = true;
                 startPts = pkt->pts;
                 av_seek_frame(_inputFormatCtx, pkt->stream_index, pkt->pts, AVSEEK_FLAG_BACKWARD);
+                std::cout << "stop drop : " << typeStr.at(_inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) << pkt->pts * av_q2d(timebaseIn) << " " << pkt->pts << " " << pkt->flags << std::endl;
                 av_packet_unref(pkt);
                 continue;
             }
 
             if (pkt->flags & AV_PKT_FLAG_KEY && pkt->pts >= startPts) {
                 reCoding = false;
-                //处理积压的帧
-                //doReCoding(startPts, vNextTs, timebaseIn, timebaseOut);
+                std::cout << "new key frame , stop recording : " << typeStr.at(_inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) << pkt->pts * av_q2d(timebaseIn) << " " << pkt->pts << " " << pkt->flags << std::endl;
             }
 
             if (reCoding) {
                 //send to decode 
-                std::cout << "send recoding packet " << std::endl;
                 if (pkt->pts < startPts) {
                     pkt->flags |= AV_PKT_FLAG_DISCARD;
+                    std::cout << "decode but not out frame : " << typeStr.at(_inputFormatCtx->streams[pkt->stream_index]->codecpar->codec_type) << pkt->pts * av_q2d(timebaseIn) << " " << pkt->pts << " " << pkt->flags << std::endl;
                 }
                 ret = avcodec_send_packet(_decodeCtx, pkt);
                 if (ret < 0) {
@@ -398,23 +460,55 @@ void saveStream::save()
                     fprintf(stderr, "--------Error avcodec_receive_frame ()\n");
                     break;
                 }
+                std::cout << "get recoding frame : " << "video " << frame->pts * av_q2d(timebaseIn) << " " << frame->pts << std::endl;
+                
+                ret = av_buffersrc_add_frame_flags(_filterCtx, frame, AV_BUFFERSRC_FLAG_KEEP_REF);
+                if (ret < 0) {
+                    std::cout << "add err   " << AVERROR(ret) << std::endl;
+                    break;
+                }
 
-                ret = avcodec_send_frame(_encodeCtx, frame);
+                AVFrame* filterFrame = av_frame_alloc();
+                ret = av_buffersink_get_frame(_filterCtxSink, filterFrame);
+                if (ret == AVERROR(EAGAIN)) {
+                    av_frame_free(&filterFrame);
+                    av_frame_free(&frame);
+                    std::cout << "continue : " << __LINE__ << std::endl;
+                    continue;
+                }
+                else if (ret != 0) {
+                    fprintf(stderr, "--------Error avcodec_receive_frame ()\n");
+                    break;
+                }
+                else {
+                    //std::cout << "av_buffersink_get_frame suc" << std::endl;
+                }
+  
+                ret = avcodec_send_frame(_encodeJpegCtx, filterFrame);
                 if (ret != 0) {
                     fprintf(stderr, "--------Error avcodec_send_frame ()\n");
                     break;
                 }
 
-                ret = avcodec_send_frame(_encodeJpegCtx, frame);
+                if (filterFrame->pts == startPts) {
+                    //filterFrame->key_frame = 1;
+                    //filterFrame->pict_type = AV_PICTURE_TYPE_I;
+                }
+                AVFrame* frameEnc = av_frame_alloc();
+                av_frame_ref(frameEnc, filterFrame);
+                std::cout << frameEnc->width << " " << frameEnc->height << std::endl;
+                ret = avcodec_send_frame(_encodeCtx, frameEnc);
                 if (ret != 0) {
                     fprintf(stderr, "--------Error avcodec_send_frame ()\n");
                     break;
                 }
+                av_frame_free(&filterFrame);
+                av_frame_free(&frame);
+                av_frame_free(&frameEnc);
 
                 ret = avcodec_receive_packet(_encodeJpegCtx, pkt);
                 if (ret == AVERROR(EAGAIN)) {
-                    av_frame_free(&frame);
-                    continue;
+                    //continue;
                 }
                 else if (ret != 0) {
                     fprintf(stderr, "--------Error avcodec_receive_packet ()\n");
@@ -452,19 +546,18 @@ void saveStream::save()
                     int ret = av_write_trailer(jpegOut);
  
                     avformat_close_input(&jpegOut);
+                    av_packet_unref(pkt);
                 }
 
                 ret = avcodec_receive_packet(_encodeCtx, pkt);
                 if (ret == AVERROR(EAGAIN)) {  
-                    av_frame_free(&frame);
+                    std::cout << "continue : " << __LINE__ << std::endl;
                     continue;
                 }
                 else if (ret != 0) {
                     fprintf(stderr, "--------Error avcodec_receive_packet ()\n");
                     break;
                 }
-                
-                av_frame_free(&frame);
             }
 
             vNextTs = vNextTs == 0 ? pkt->pts : vNextTs + pkt->duration;

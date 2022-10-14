@@ -9,6 +9,7 @@ extern "C" {
 	#include "libswscale/swscale.h"
 	#include "libavdevice/avdevice.h"
 	#include <libavutil/timestamp.h>
+	#include "libavfilter/avfilter.h"
 }
 
 class saveStream
@@ -17,6 +18,7 @@ public:
 	bool openInput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\in.mp4");
 	bool openOutput(std::string filePath = "E:\\lr\\ubuntu\\share\\lr\\out.mp4");
 	bool openCodec();
+	bool openFilter();
 	void save();
 
 private:
@@ -30,5 +32,9 @@ private:
 	AVCodecContext* _decodeCtx;
 	AVCodecContext* _encodeCtx;
 	AVCodecContext* _encodeJpegCtx;
+
+	AVFilterGraph* _filterGrap;
+	AVFilterContext* _filterCtx;
+	AVFilterContext* _filterCtxSink;
 };
 
