@@ -77,3 +77,17 @@ void input::close()
         _videoStream = _audioStream = nullptr;
     }
 }
+
+std::unordered_map<const AVCodecParameters*, AVRational> input::getStreamParam()
+{
+    std::unordered_map<const AVCodecParameters*, AVRational> params;
+
+    for (int i = 0; i < _ctx->nb_streams; i++) {
+        int streamType = _ctx->streams[i]->codecpar->codec_type;
+        if (streamType == AVMEDIA_TYPE_VIDEO || streamType == AVMEDIA_TYPE_AUDIO) {
+            params.insert(std::make_pair(_ctx->streams[i]->codecpar, _ctx->streams[i]->time_base));
+        }
+    }
+    printf("nbstreams %d, params size : %d \r\n", _ctx->nb_streams, params.size());
+    return params;
+}

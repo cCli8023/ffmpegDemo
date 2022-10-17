@@ -4,6 +4,7 @@
 
 #include <string>
 #include <memory>
+#include <unordered_map>
 
 extern "C" {
 	#include "libavcodec/avcodec.h"
@@ -26,7 +27,7 @@ public:
 	bool openInput(std::string url = "");
 	std::shared_ptr<AVPacket> getPacket();
 	void close();
-
+	std::unordered_map<const AVCodecParameters*, AVRational> getStreamParam();
 private:
 	AVFormatContext* _ctx = NULL; 
 	AVStream* _videoStream = NULL;
