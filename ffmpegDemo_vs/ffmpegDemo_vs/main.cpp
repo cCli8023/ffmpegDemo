@@ -1,7 +1,7 @@
 #include "saveStream.h"
 
 
-int main() {
+int main1() {
     saveStream s;
     s.openInput();
     s.openOutput();
