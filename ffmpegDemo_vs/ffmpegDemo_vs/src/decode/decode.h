@@ -15,8 +15,8 @@ class decode
 {
 public:
 	~decode();
-	bool initDecode();
-	bool decodePkt(std::shared_ptr<AVPacket> pkt);
+	bool initDecode(const AVStream* st);
+	std::shared_ptr<AVFrame> decodePkt(std::shared_ptr<AVPacket> pkt);
 
 private:
 	AVCodecContext* _ctx = nullptr;

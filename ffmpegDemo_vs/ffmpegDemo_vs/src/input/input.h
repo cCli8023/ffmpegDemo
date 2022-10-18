@@ -28,6 +28,9 @@ public:
 	std::shared_ptr<AVPacket> getPacket();
 	void close();
 	std::unordered_map<const AVCodecParameters*, AVRational> getStreamParam();
+	const AVStream* videoStream() {
+		return _videoStream;
+	}
 private:
 	AVFormatContext* _ctx = NULL; 
 	AVStream* _videoStream = NULL;

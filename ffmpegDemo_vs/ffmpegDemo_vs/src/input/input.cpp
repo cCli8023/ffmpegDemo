@@ -38,17 +38,30 @@ bool input::openInput(std::string url)
             printf("find stream err\r\n");
             break;
         }
-
+#if 1
+        for (int i = 0; i < _ctx->nb_streams; i++) {
+            if (_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                _videoStream = _ctx->streams[i];
+            }   
+            else if (_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                _audioStream = _ctx->streams[i];
+            }
+        }
+#else
         ret = av_find_best_stream(_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
         if (ret > 0) {
             _videoStream = _ctx->streams[ret];
+        }
+        else {
+            printf("not find video stream \r\n");
         }
 
         ret = av_find_best_stream(_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
         if (ret > 0) {
             _audioStream = _ctx->streams[ret];
         }
-
+#endif
+        printf("%p %p \r\n", _videoStream, _audioStream);
         return true;
     } while (0);
 
