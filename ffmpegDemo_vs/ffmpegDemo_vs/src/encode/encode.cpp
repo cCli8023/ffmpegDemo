@@ -12,7 +12,7 @@ bool encode::initEncode(const AVStream* st)
         return false;
     }
     do {
-        printf("%d \r\n", __LINE__);
+        printf("%d  %d \r\n", __LINE__, st->codecpar->codec_id);
         const AVCodec* c = avcodec_find_encoder(st->codecpar->codec_id);
         if (c == NULL) {
             break;
@@ -31,8 +31,11 @@ bool encode::initEncode(const AVStream* st)
         _ctx->gop_size = 100;
         _ctx->max_b_frames = 1;
         _ctx->pix_fmt = (AVPixelFormat)par->format;
-        if (c->id == AV_CODEC_ID_H264)
+        if (c->id == AV_CODEC_ID_H264) {
             av_opt_set(_ctx->priv_data, "preset", "slow", 0);
+            av_opt_set(_ctx->priv_data, "tune", "zerolatency", 0);
+        }
+            
 
 
         printf("%d \r\n", __LINE__);
@@ -54,17 +57,49 @@ std::shared_ptr<AVPacket> encode::encodeFrame(std::shared_ptr<AVFrame> frm)
 {
     int ret = avcodec_send_frame(_ctx, frm.get());
     if (ret != 0) {
+        printf("avcodec_send_frame err\r\n");
         return nullptr;
     }
 
     std::shared_ptr<AVPacket> pkt(av_packet_alloc(), [&](AVPacket* p) {
         av_packet_free(&p);
     });
-
+#if 0
+    while (1) {
+        ret = avcodec_receive_packet(_ctx, pkt.get());
+        if (ret != 0) {
+            printf("avcodec_receive_packet err %d %d %d %d  \r\n", ret, AVERROR(EAGAIN), AVERROR_EOF, AVERROR(EINVAL));
+            continue;
+        }
+        else {
+            break;
+        }
+    }
+#else
     ret = avcodec_receive_packet(_ctx, pkt.get());
     if (ret != 0) {
+        printf("avcodec_receive_packet err %d %d %d %d  \r\n", ret, AVERROR(EAGAIN), AVERROR_EOF, AVERROR(EINVAL));
         return nullptr;
     }
-
+#endif
 	return pkt;
+}
+
+void encode::receiveOtherPkt(AVRational timebase)
+{
+    std::shared_ptr<AVPacket> pkt(av_packet_alloc(), [&](AVPacket* p) {
+        av_packet_free(&p);
+        });
+
+    while (1) {
+        int ret = avcodec_receive_packet(_ctx, pkt.get());
+        if (ret != 0) {
+            printf("other avcodec_receive_packet err %d %d %d %d  \r\n", ret, AVERROR(EAGAIN), AVERROR_EOF, AVERROR(EINVAL));
+            return;
+        }
+        else {
+            printf("other encPkt pts : %lld %lf\r\n", pkt.get()->pts, pkt.get()->pts * av_q2d(timebase));
+        }
+        av_packet_unref(pkt.get());
+    }
 }

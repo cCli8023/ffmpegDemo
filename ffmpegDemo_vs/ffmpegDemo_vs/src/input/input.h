@@ -31,6 +31,9 @@ public:
 	const AVStream* videoStream() {
 		return _videoStream;
 	}
+	const AVStream* audioStream() {
+		return _audioStream;
+	}
 private:
 	AVFormatContext* _ctx = NULL; 
 	AVStream* _videoStream = NULL;

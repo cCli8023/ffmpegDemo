@@ -17,7 +17,7 @@ public:
 	~encode();
 	bool initEncode(const AVStream* st);
 	std::shared_ptr<AVPacket> encodeFrame(std::shared_ptr<AVFrame>);
-
+	void receiveOtherPkt(AVRational timebase);
 private:
 	AVCodecContext* _ctx = nullptr;
 };
