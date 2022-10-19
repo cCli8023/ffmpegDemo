@@ -29,8 +29,9 @@ bool encode::initEncode(const AVStream* st)
         _ctx->time_base = st->time_base;
         _ctx->framerate = st->r_frame_rate;
         _ctx->gop_size = 100;
-        _ctx->max_b_frames = 1;
+        _ctx->max_b_frames = 0;
         _ctx->pix_fmt = (AVPixelFormat)par->format;
+
         if (c->id == AV_CODEC_ID_H264) {
             av_opt_set(_ctx->priv_data, "preset", "slow", 0);
             av_opt_set(_ctx->priv_data, "tune", "zerolatency", 0);
@@ -55,6 +56,7 @@ bool encode::initEncode(const AVStream* st)
 
 std::shared_ptr<AVPacket> encode::encodeFrame(std::shared_ptr<AVFrame> frm)
 {
+    printf("avcodec_send_frame %lld  %lld \r\n", frm->pts, frm->pkt_duration);
     int ret = avcodec_send_frame(_ctx, frm.get());
     if (ret != 0) {
         printf("avcodec_send_frame err\r\n");
@@ -64,24 +66,16 @@ std::shared_ptr<AVPacket> encode::encodeFrame(std::shared_ptr<AVFrame> frm)
     std::shared_ptr<AVPacket> pkt(av_packet_alloc(), [&](AVPacket* p) {
         av_packet_free(&p);
     });
-#if 0
-    while (1) {
-        ret = avcodec_receive_packet(_ctx, pkt.get());
-        if (ret != 0) {
-            printf("avcodec_receive_packet err %d %d %d %d  \r\n", ret, AVERROR(EAGAIN), AVERROR_EOF, AVERROR(EINVAL));
-            continue;
-        }
-        else {
-            break;
-        }
-    }
-#else
+
     ret = avcodec_receive_packet(_ctx, pkt.get());
     if (ret != 0) {
         printf("avcodec_receive_packet err %d %d %d %d  \r\n", ret, AVERROR(EAGAIN), AVERROR_EOF, AVERROR(EINVAL));
         return nullptr;
     }
-#endif
+    pkt->duration = frm->pkt_duration;
+
+    printf("avcodec_receive_packet : %llu %llu %llu, pts \r\n",  pkt->pts, pkt->dts, pkt->duration);
+
 	return pkt;
 }
 

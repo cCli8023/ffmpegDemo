@@ -206,10 +206,10 @@ int main() {
     const int videoIdx = in.videoStream()->index;
     const int audioIdx = in.audioStream()->index;
     int64_t videoPts = 0, audioPts = 0;
-
+    int64_t nextVideoPts = 0;
+    bool reCoding = 0;
     std::map<float, float> vaildTimeSecondRange = {
-        {0, 5},
-        {10, 15},
+        {0, 10},
         {45, 50}
     };
 
@@ -236,15 +236,65 @@ int main() {
         else {
             curIdx = pkt.get()->stream_index;
 
+            if (curIdx == videoIdx) {
+                //printf("vaild pts %lld %lld time %f %d\r\n", pkt->pts, pkt->dts, pkt->pts * av_q2d(videoTimebase), pkt->flags);
+                //continue;
+            }
+
             if (funcInRange(pkt.get()->pts, curIdx==videoIdx ? videoTimebase : audioTimebase) == false) {
-                continue;
+                if (reCoding == true && curIdx == videoIdx) {
+                
+                }
+                else {
+                    continue;
+                }
             }
 
             if (curIdx == videoIdx) {
+                printf("vaild pts %lld %lld time %f %d\r\n", pkt->pts, pkt->dts, pkt->pts * av_q2d(videoTimebase), pkt->flags);
+                //find jump point
+                if (nextVideoPts !=0 && nextVideoPts < pkt->pts && reCoding != true) {
+                    printf("video is jump %f\r\n", pkt->pts * av_q2d(videoTimebase));
+                    reCoding = true;
+                    //seek
+                    in.seek(pkt->stream_index, pkt->pts, AVSEEK_FLAG_BACKWARD);
+                    nextVideoPts = pkt->pts;
+                    continue;
+                }
+                //exit recoding
+                if (pkt->flags & AV_PKT_FLAG_KEY && pkt->pts >= nextVideoPts && reCoding==true) {
+                    printf("exit recoding pts %lld %lld time %f %d\r\n", pkt->pts, pkt->dts, pkt->pts * av_q2d(videoTimebase), pkt->flags);
+                    reCoding = false;
+                }
+                //recoding
+                if (reCoding == true) {
+                    //read pkt
+                    printf("-----recoding pts %lld %lld time %f %d\r\n", pkt->pts, pkt->dts, pkt->pts * av_q2d(videoTimebase), pkt->flags);
+                    // add flag
+                    if (pkt->pts < nextVideoPts) {
+                        pkt->flags |= AV_PKT_FLAG_DISCARD;//decode but not output frame
+                        printf("-------------------------drop pts %lld time %f\r\n", pkt->pts, pkt->pts * av_q2d(videoTimebase));
+                    }
+                    //send to decode receive frame
+                    auto frm = decInput.decodePkt(pkt);
+                    if (frm == nullptr) {
+                        continue;
+                    }
+                    //send to encode receive pkt
+                    pkt = enc.encodeFrame(frm);
+                    if (pkt == nullptr) {
+                        continue;
+                    }
+
+                }else{
+                    nextVideoPts = pkt->pts + pkt->duration;
+                }
+                printf("------------------write pts %lld time %f %llu\r\n", pkt->pts, pkt->pts*av_q2d(videoTimebase), pkt->duration);
                 videoPts == 0 ? videoPts = pkt->pts : videoPts += pkt->duration;
                 int64_t offset = pkt->pts - pkt->dts;
                 pkt->pts = videoPts;
                 pkt->dts = pkt->pts - offset;
+                printf("write pts %llu dts %llu \r\n", pkt->pts, pkt->dts);
             }
             else if (curIdx == audioIdx) {
                 audioPts == 0 ? audioPts = pkt->pts : audioPts += pkt->duration;

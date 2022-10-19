@@ -34,6 +34,10 @@ public:
 	const AVStream* audioStream() {
 		return _audioStream;
 	}
+	int seek(int stream_index, int64_t timestamp, int flags) {
+		return av_seek_frame(_ctx, stream_index, timestamp, flags);
+	}
+
 private:
 	AVFormatContext* _ctx = NULL; 
 	AVStream* _videoStream = NULL;
